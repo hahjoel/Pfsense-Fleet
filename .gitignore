@@ -1,0 +1,4 @@
+__pycache__/
+firewalls.json
+*.tmp
+backups/

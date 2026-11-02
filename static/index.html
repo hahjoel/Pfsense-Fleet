@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pfSense Fleet</title>
+<script>
+  // apply saved theme before paint (no flash); default follows the OS setting
+  (function(){ var t; try { t = localStorage.getItem("theme"); } catch(e){}
+    if (!t) t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    document.documentElement.dataset.theme = t; })();
+</script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>pfSense Fleet</h1>
+  <span class="sum" id="sum">—</span>
+  <span class="sp"></span>
+  <label class="hint"><input type="checkbox" id="auto" checked> auto-refresh 30s</label>
+  <button id="themeBtn" title="Toggle light / dark mode"></button>
+  <button id="lastOut" disabled title="Reopen the last results">Last output</button>
+  <button id="refresh">Refresh</button>
+  <button class="primary" id="addBtn">+ Add firewall</button>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Firewalls <span class="sp"></span>
+      <select id="groupFilter"><option value="">All groups</option></select>
+    </h2>
+    <div class="tw">
+      <table>
+        <thead><tr>
+          <th><input type="checkbox" id="selAll"></th>
+          <th></th><th>Name</th><th>Host</th><th>Via</th><th>Hostname</th>
+          <th>Version</th><th>Uptime</th><th>CPU</th><th>Mem</th>
+          <th title="Bytes in / out on assigned interfaces since boot; rate since last refresh">Traffic</th>
+          <th class="num">ms</th><th></th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty" id="empty" hidden>No firewalls yet. Click <b>+ Add firewall</b>.</div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <section class="panel">
+      <h2>Actions on <span id="selCount">0</span> selected</h2>
+      <div class="box">
+        <div class="qa" id="qa">
+          <button data-a="check-updates">Check updates</button>
+          <button data-a="backup">Save backup</button>
+          <button id="usersBtn">Users &amp; SSH keys</button>
+          <button class="danger" data-a="reboot">Reboot</button>
+        </div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Logs</h2>
+      <div class="box">
+        <div class="row">
+          <select id="logName" style="flex:1"></select>
+          <select id="logLines"><option>50</option><option selected>200</option><option>500</option><option>2000</option></select>
+        </div>
+        <div class="row">
+          <input id="logFilter" placeholder="filter text (optional)" style="flex:1">
+          <button class="primary" id="logBtn">Show</button>
+        </div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Shell command</h2>
+      <div class="box">
+        <textarea id="cmd" placeholder="pfctl -si"></textarea>
+        <div class="row"><button id="runBtn">Run</button><span class="hint">Ctrl+Enter · /bin/sh on SSH, Command Prompt on REST</span></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Backups <span class="sp"></span><button class="link" id="bkRefresh">refresh</button></h2>
+      <div id="bk" class="bk"></div>
+    </section>
+  </aside>
+</main>
+
+<dialog id="dlg">
+  <form method="dialog" id="frm">
+    <label class="full">Name<input name="name" required></label>
+    <label>Host / IP<input name="host" required></label>
+    <label>Group<input name="group" placeholder="optional"></label>
+    <label>Method
+      <select name="method"><option value="ssh">SSH</option><option value="rest">REST API (pfSense-pkg-RESTAPI)</option></select>
+    </label>
+    <label>Port<input name="port" type="number" placeholder="auto"></label>
+    <label>Username<input name="username" value="admin" required></label>
+    <label>Password<input name="password" type="password" autocomplete="new-password"></label>
+    <label class="full rest-only">API key (optional — used instead of username/password)<input name="api_key" type="password" autocomplete="off"></label>
+    <label class="chk full rest-only"><input type="checkbox" name="verify_ssl"> Verify TLS certificate</label>
+    <div class="act">
+      <button type="button" class="danger" id="delBtn" hidden>Delete</button>
+      <span style="flex:1"></span>
+      <button type="button" id="cancel">Cancel</button>
+      <button class="primary" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="usrDlg" class="out-dlg usr-dlg">
+  <div class="out-head">
+    <b>Users &amp; SSH keys</b>
+    <span class="hint" id="usrMeta"></span>
+    <span class="sp"></span>
+    <button class="link" id="usrReload">reload</button>
+    <button class="link" id="usrClose" aria-label="Close">✕</button>
+  </div>
+  <div class="usr-body">
+    <div class="usr-list">
+      <table>
+        <thead><tr><th>User</th><th>On</th><th>Groups</th><th class="num">Keys</th></tr></thead>
+        <tbody id="usrRows"></tbody>
+      </table>
+      <div class="hint" id="usrErr" style="padding:8px 10px"></div>
+    </div>
+    <form class="usr-form" id="usrFrm" autocomplete="off">
+      <div class="row"><b id="usrTitle">New user</b><span class="sp"></span><button type="button" class="link" id="usrNew">+ new user</button></div>
+      <label>Username<input name="name" required pattern="[A-Za-z0-9._\-]{1,32}"></label>
+      <label>Full name<input name="descr"></label>
+      <label>Password <span class="hint" id="pwHint">(required for new users)</span><input name="password" type="password" autocomplete="new-password"></label>
+      <label>Groups <span class="hint">comma separated</span><input name="groups" list="grpList" placeholder="admins"></label>
+      <datalist id="grpList"></datalist>
+      <div class="row">
+        <label class="chk"><input type="checkbox" name="shell"> Shell (SSH) access</label>
+        <label class="chk"><input type="checkbox" name="disabled"> Disabled</label>
+      </div>
+      <label>SSH public keys <span class="hint">one per line</span>
+        <textarea name="keys" placeholder="ssh-ed25519 AAAA... user@laptop"></textarea></label>
+      <div class="row keymode">
+        <label class="chk"><input type="radio" name="key_mode" value="append" checked> Add to existing</label>
+        <label class="chk"><input type="radio" name="key_mode" value="replace"> Replace all</label>
+        <label class="chk"><input type="radio" name="key_mode" value="remove"> Remove these</label>
+      </div>
+      <div id="usrKeys" class="keys"></div>
+      <div class="hint" id="dirtyHint">For existing users only the fields you change are applied.</div>
+      <div class="row">
+        <button type="button" class="danger" id="usrDel" hidden>Delete from selected</button>
+        <span class="sp"></span>
+        <button class="primary" type="submit" id="usrApply">Apply to selected</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="outDlg" class="out-dlg">
+  <div class="out-head">
+    <b id="outTitle">Output</b>
+    <span class="hint" id="outMeta"></span>
+    <span class="sp"></span>
+    <button class="link" id="outCopy">copy all</button>
+    <button class="link" id="outMax" title="Maximize / restore">⤢</button>
+    <button class="link" id="outClose" aria-label="Close">✕</button>
+  </div>
+  <div id="out"></div>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
